@@ -106,7 +106,7 @@ def test_command_parsing_supports_previous_syntax():
 
 
 def test_wrong_address_creates_invitation_but_no_patient_leak(client, monkeypatch):
-    """M1 will require an identity block in Step 3; Step 2 must at least hide data."""
+    """M1 invitation must hide patient details even after Step 3 upgrade."""
     captured = []
     monkeypatch.setattr(gateway, "deliver_email", lambda to, url: captured.append((to, url)))
     r = post(client, body(event_id="$wrong-address", contact="eva.brandl@labor-kanaI.example"))
@@ -115,7 +115,7 @@ def test_wrong_address_creates_invitation_but_no_patient_leak(client, monkeypatc
     link = captured[0][1].removeprefix("http://127.0.0.1:8000")
     text = client.get(link).text
     assert "Maria" not in text and "Beispiel" not in text
-    assert "identity verification is not implemented" in text.lower()
+    assert "verify identity" in text.lower()
 
 
 def test_expired_or_unknown_link_is_rejected(client):

@@ -1,6 +1,6 @@
-"""Step 2: Matrix requests -> SQLite audit -> synthetic email/SMS invitation.
+"""Steps 2-3: Matrix requests, synthetic identity verification, and misdelivery checks.
 
-LOCAL DEMO ONLY. No identity verification, clinical data upload, or FHIR filing yet.
+LOCAL DEMO ONLY. Synthetic data; no real identity provider or FHIR filing yet.
 """
 from __future__ import annotations
 
@@ -86,6 +86,8 @@ def init_db() -> None:
             created_at TEXT NOT NULL
         );
         """)
+        from .identity import init_identity_db
+        init_identity_db(cx)
 
 
 @asynccontextmanager
@@ -94,7 +96,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="PGK Last Mile Gateway (Step 2)", lifespan=lifespan)
+app = FastAPI(title="PGK Last Mile Gateway (Step 3)", lifespan=lifespan)
 
 
 class CreateRequest(BaseModel):
@@ -153,7 +155,7 @@ def request_public_response(row: sqlite3.Row, created: bool):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "stage": "requests-only"}
+    return {"status": "ok", "stage": "identity-and-misdelivery"}
 
 
 @app.post("/internal/requests", dependencies=[Depends(require_bot)], status_code=201)
@@ -246,30 +248,7 @@ def get_sms_outbox():
     return {"messages": [dict(r) for r in rows]}
 
 
-@app.get("/r/{token}", response_class=HTMLResponse)
-def invitation_landing(token: str):
-    """No clinical details are exposed before verification (implemented in step 3)."""
-    token_hash = sha256(token.encode()).hexdigest()
-    with connect() as cx:
-        row = cx.execute("SELECT request_id, expires_at FROM requests WHERE token_hash = ?", (token_hash,)).fetchone()
-        valid = row is not None and datetime.fromisoformat(row["expires_at"]) > datetime.now(timezone.utc)
-        if valid:
-            record_audit(cx, row["request_id"], "unverified-link-holder", "LINK_OPENED")
-    content = (
-        "<h1>Secure document request</h1>"
-        "<p>Invitation received. Identity verification is not implemented in Step 2. "
-        "No patient or document details are available.</p>"
-        if valid else "<h1>Invitation unavailable</h1><p>The link has expired or is invalid.</p>"
-    )
-    return HTMLResponse(
-        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>PGK Gateway</title></head><body>" + content + "</body></html>",
-        status_code=200 if valid else 404,
-        headers={
-            "Cache-Control": "no-store",
-            "Referrer-Policy": "no-referrer",
-            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
-            "X-Content-Type-Options": "nosniff",
-        },
-    )
+# Identity routes replace the Step 2 placeholder landing page.  Existing bot
+# endpoints and the SQLite database are kept without resetting them.
+from .identity import router as identity_router
+app.include_router(identity_router)

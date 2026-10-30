@@ -1,1 +1,2 @@
-pisya kaka
+Room ID: !0WxGFDVIhEmkfihSA5qVbqMvteBfR3TgmZBlS1UclQw
+Token to connect bot and FastAPI: Hyx6ydS6xqOy8D8-ZamVQJrpH6r--kh0ezxumN4aE5s
