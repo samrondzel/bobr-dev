@@ -1,0 +1,11 @@
+{
+  "default_server_config": {
+    "m.homeserver": {
+      "base_url": "http://localhost:8008",
+      "server_name": "klinikum.example"
+    }
+  },
+  "disable_custom_urls": true,
+  "enable_client_well_known_lookups": false,
+  "brand": "PGK Hackathon (local test)"
+}

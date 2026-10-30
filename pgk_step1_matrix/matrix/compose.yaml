@@ -1,0 +1,21 @@
+name: pgk-matrix
+services:
+  synapse:
+    image: matrixdotorg/synapse:latest
+    environment:
+      SYNAPSE_SERVER_NAME: klinikum.example
+      SYNAPSE_REPORT_STATS: "no"
+    volumes:
+      - synapse_data:/data
+    ports:
+      - "127.0.0.1:8008:8008"
+    restart: unless-stopped
+  element:
+    image: ghcr.io/element-hq/element-web:latest
+    volumes:
+      - ./element-config.json:/app/config.json:ro
+    ports:
+      - "127.0.0.1:8080:80"
+    restart: unless-stopped
+volumes:
+  synapse_data:
