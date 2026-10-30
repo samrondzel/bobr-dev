@@ -1,2 +1,7 @@
 Room ID: !0WxGFDVIhEmkfihSA5qVbqMvteBfR3TgmZBlS1UclQw
 Token to connect bot and FastAPI: Hyx6ydS6xqOy8D8-ZamVQJrpH6r--kh0ezxumN4aE5s
+
+Dr. Nora Weiss
+Subject ID: eid-demo-f37152e9c0fa43e483b0fcd1e703caa2
+One-time display of mock credential: tKGk3JLBhDY6pw
+

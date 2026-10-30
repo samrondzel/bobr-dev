@@ -83,48 +83,90 @@ def expected_patient() -> dict:
         raise RuntimeError("Unable to load configured FHIR Patient") from exc
 
 
+def valid_loinc_code(code: str) -> bool:
+    """LOINC numeric codes use a Mod-10/Luhn check digit, not just a regex."""
+    if not re.fullmatch(r"\d{1,7}-\d", code):
+        return False
+    digits = code.replace("-", "")
+    total = 0
+    for pos, character in enumerate(reversed(digits)):
+        digit = int(character)
+        if pos % 2:
+            digit *= 2
+            digit = digit // 10 + digit % 10
+        total += digit
+    return total % 10 == 0
+
+
+def _column_name(name: str) -> str:
+    name = re.sub(r"\s+", " ", name.strip().strip("*` ").casefold())
+    return {"value": "result", "units": "unit", "loinc": "loinc code",
+            "loinc-code": "loinc code", "reference interval": "reference range"}.get(name, name)
+
+
 def parse_lab_rows(markdown: str) -> list[dict]:
+    """Parse every matching lab table; fail closed on malformed or partial tables.
+
+    Different patients or new tests are allowed in the input *format*, but their
+    identity and LOINC integrity are checked before any clinical filing.
+    """
     lines = [line.strip() for line in markdown.splitlines()]
-    header_idx = None
-    columns = None
-    for i, line in enumerate(lines):
+    results: list[dict] = []
+    seen_lab = False
+    pos = 0
+    required = {"test", "result", "unit", "loinc code"}
+    while pos < len(lines):
+        line = lines[pos]
         if not (line.startswith("|") and line.endswith("|")):
+            pos += 1
             continue
-        fields = [part.strip().casefold() for part in line.strip("|").split("|")]
-        if {"test", "result", "unit", "loinc code"}.issubset(fields):
-            header_idx = i
-            columns = fields
-            break
-    if header_idx is None or columns is None:
+        fields = [_column_name(part) for part in line.strip("|").split("|")]
+        is_lab = required.issubset(fields)
+        partial_lab = ("loinc code" in fields or ("test" in fields and "result" in fields))
+        if partial_lab and not is_lab:
+            raise InvalidDocument("Incomplete laboratory table headers")
+        if not is_lab:
+            pos += 1
+            continue
+        if len(fields) != len(set(fields)):
+            raise InvalidDocument("Duplicate laboratory table columns")
+        seen_lab = True
+        pos += 1
+        if pos >= len(lines) or not re.fullmatch(r"\|[\s:|\-]+\|", lines[pos]):
+            raise InvalidDocument("Lab table is missing a Markdown separator")
+        pos += 1
+        count = 0
+        while pos < len(lines) and lines[pos].startswith("|") and lines[pos].endswith("|"):
+            cells = [part.strip() for part in lines[pos].strip("|").split("|")]
+            if len(cells) != len(fields):
+                raise InvalidDocument("Laboratory table row has incorrect column count")
+            record = dict(zip(fields, cells))
+            raw_value = record["result"]
+            match = re.fullmatch(r"(<=|>=|<|>)?\s*([+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+))", raw_value)
+            if not match:
+                raise InvalidDocument("Non-numeric laboratory result")
+            value = float(match.group(2).replace(",", "."))
+            from math import isfinite
+            if not isfinite(value):
+                raise InvalidDocument("Non-finite laboratory result")
+            loinc = record["loinc code"]
+            if not valid_loinc_code(loinc):
+                raise InvalidDocument("Invalid LOINC code or check digit")
+            if not record["test"]:
+                raise InvalidDocument("Laboratory test name is required")
+            result = {"test": record["test"], "value": value,
+                      "unit": record["unit"], "loinc": loinc,
+                      "reference_range": record.get("reference range", "")}
+            if match.group(1):
+                result["comparator"] = match.group(1)
+            results.append(result)
+            count += 1
+            pos += 1
+        if count == 0:
+            raise InvalidDocument("Laboratory table contains no values")
+    if not seen_lab:
         raise InvalidDocument("Laboratory report requires a Markdown table with Test, Result, Unit and LOINC code")
-    if header_idx + 1 >= len(lines) or not re.fullmatch(r"\|[\s:|\-]+\|", lines[header_idx + 1]):
-        raise InvalidDocument("Lab table is missing a Markdown separator")
-    values = []
-    for line in lines[header_idx + 2:]:
-        if not line.startswith("|") or not line.endswith("|"):
-            break
-        cells = [part.strip() for part in line.strip("|").split("|")]
-        if len(cells) != len(columns):
-            raise InvalidDocument("Laboratory table row has incorrect column count")
-        record = dict(zip(columns, cells))
-        try:
-            value = float(record["result"].replace(",", "."))
-        except ValueError as exc:
-            raise InvalidDocument("Non-numeric laboratory result") from exc
-        from math import isfinite
-        if not isfinite(value):
-            raise InvalidDocument("Non-finite laboratory result")
-        loinc = record["loinc code"]
-        if not re.fullmatch(r"\d{1,7}-\d", loinc):
-            raise InvalidDocument("Missing/invalid LOINC code format")
-        values.append({
-            "test": record["test"], "value": value,
-            "unit": record["unit"], "loinc": loinc,
-            "reference_range": record.get("reference range", ""),
-        })
-    if not values:
-        raise InvalidDocument("Laboratory table contains no values")
-    return values
+    return results
 
 
 def parse_submission(markdown: str, kind: str) -> tuple[PatientClaim, dict]:

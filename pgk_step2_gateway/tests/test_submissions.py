@@ -174,7 +174,7 @@ def test_parser_patient_line_date_variants_and_variable_rows():
     assert parse_patient_claim("Patient: Maria Beispiel, born 12 March 1961").birth_date == "1961-03-12"
     assert parse_patient_claim("Patient: Maria Beispiel\nDOB: 1961-03-12").birth_date == "1961-03-12"
     assert parse_patient_claim("Patient: Maria Beispiel\nDOB: 12.03.1961").birth_date == "1961-03-12"
-    claim, data = parse_submission(lab(value="1,3", extra="| Novel X | 3.4 | mg/L | 1 to 5 | 99999-1 |"), "lab")
+    claim, data = parse_submission(lab(value="1,3", extra="| Novel X | 3.4 | mg/L | 1 to 5 | 4548-4 |"), "lab")
     assert claim.name == "Maria Beispiel"
     assert len(data["observations"]) == 3
     assert data["observations"][0]["value"] == pytest.approx(1.3)

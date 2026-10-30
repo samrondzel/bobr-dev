@@ -1,6 +1,6 @@
-"""Steps 2-4: Matrix, mock eID, and Markdown submissions with M1-M3 checks.
+"""PGK hackathon gateway (Matrix, mock eID, Markdown and FHIR R4).
 
-LOCAL DEMO ONLY. Synthetic data; FHIR filing is not yet implemented.
+LOCAL DEMO ONLY. Only synthetic data; mock identity checks are NOT real ID Austria.
 """
 from __future__ import annotations
 
@@ -86,8 +86,14 @@ def init_db() -> None:
             created_at TEXT NOT NULL
         );
         """)
+        # Existing Step 5 SQLite installations are migrated in place.
+        existing_columns = {c[1] for c in cx.execute("PRAGMA table_info(requests)")}
+        if "expected_eid_subject" not in existing_columns:
+            cx.execute("ALTER TABLE requests ADD COLUMN expected_eid_subject TEXT")
         from .identity import init_identity_db
         init_identity_db(cx)
+        from .mock_issuer import init_issuer_db
+        init_issuer_db(cx)
         from .submissions import init_submission_db
         init_submission_db(cx)
         from .fhir import init_fhir_db
@@ -100,7 +106,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="PGK Last Mile Gateway (Step 5)", lifespan=lifespan)
+app = FastAPI(title="PGK Last Mile Gateway (Step 6)", lifespan=lifespan)
 
 
 class CreateRequest(BaseModel):
@@ -110,6 +116,7 @@ class CreateRequest(BaseModel):
     document_kind: Literal["lab", "rehab"]
     recipient_name: str = Field(min_length=3, max_length=150)
     recipient_contact: str = Field(min_length=5, max_length=250)
+    expected_eid_subject: str | None = Field(default=None, max_length=100)
 
 
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
@@ -168,19 +175,24 @@ def create_request(payload: CreateRequest, response: Response):
     allowed_sender = os.getenv("PGK_ALLOWED_SENDER", "@lena.hofer:klinikum.example")
     if not allowed_room or payload.matrix_room_id != allowed_room or payload.matrix_sender != allowed_sender:
         raise HTTPException(403, "Matrix user or room not authorized")
-   
     contact = payload.recipient_contact.strip()
-
     if EMAIL_PATTERN.fullmatch(contact):
         channel = "email"
     elif PHONE_PATTERN.fullmatch(contact):
         channel = "sms"
     else:
-        raise HTTPException(
-            422,
-            "Recipient contact must be a valid email address "
-            "or international phone number"
-        )
+        raise HTTPException(422, "Recipient contact must be a valid email or international phone number")
+
+    # Link the request to an issuer-proven synthetic subject, never to a user-
+    # submitted name on the recipient portal. New subjects must be provisioned
+    # before requests are sent. Old requests use the compatibility fallback.
+    from .mock_issuer import expected_subject
+    with connect() as cx:
+        expected = expected_subject(cx, payload.recipient_name)
+    if not expected:
+        raise HTTPException(422, "Recipient is not provisioned in synthetic eID issuer")
+    if payload.expected_eid_subject and payload.expected_eid_subject != expected:
+        raise HTTPException(422, "Expected eID subject does not match provisioned recipient")
 
     # Matrix event ID is the idempotency key: reconnects MUST NOT resend invitations.
     with connect() as cx:
@@ -197,11 +209,11 @@ def create_request(payload: CreateRequest, response: Response):
             """INSERT INTO requests (
                 request_id, matrix_event_id, matrix_sender, matrix_room_id,
                 patient_ref, document_kind, recipient_name, recipient_contact,
-                delivery_channel, token_hash, expires_at, delivery_status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                delivery_channel, token_hash, expires_at, delivery_status, created_at, expected_eid_subject
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (request_id, payload.matrix_event_id, payload.matrix_sender, payload.matrix_room_id,
              "Patient/maria-beispiel", payload.document_kind, payload.recipient_name.strip(), contact,
-             channel, token_hash, expiry, "pending", now_iso()),
+             channel, token_hash, expiry, "pending", now_iso(), expected),
         )
         record_audit(cx, request_id, payload.matrix_sender, "REQUEST_CREATED", {"kind": payload.document_kind})
 

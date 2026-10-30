@@ -1,0 +1,7 @@
+{
+  "resourceType": "Patient",
+  "id": "maria-beispiel",
+  "identifier": [{"system": "urn:example:klinikum-beispielstadt:mrn", "value": "KB-000123"}],
+  "name": [{"use": "official", "family": "Beispiel", "given": ["Maria"]}],
+  "birthDate": "1961-03-12"
+}

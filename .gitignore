@@ -1,2 +1,23 @@
 .DS_Store
 __pycache__/
+# Append to repository-root .gitignore before public submission
+**/.env
+**/.env.*.local
+**/.venv/
+**/.pytest_cache/
+**/__pycache__/
+**/.state/
+**/data/
+**/fhir-validation/
+**/validator_cli.jar
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.zip
+*.log
+*.bak
+
+# Extracted final-deliverable working folder (do not commit duplicate source)
+pgk_final_submission_overlay/
+pgk_final_submission_kit.zip

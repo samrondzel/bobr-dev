@@ -123,9 +123,13 @@ def test_failed_attempt_limit(client):
 
 def test_unknown_expected_recipient_fails_closed(client):
     api, links = client
-    req_id, link = make_email_request(api, links, "$unknown", name="Different Person")
-    assert verify(api, link, "eva").status_code == 403
-    assert audit(api, req_id)[-1]["what"] == "MISDELIVERY_CAUGHT"
+    r = api.post("/internal/requests", headers={"X-Bot-Secret": SECRET}, json={
+        "matrix_event_id": "$unknown", "matrix_sender": SENDER,
+        "matrix_room_id": ROOM, "document_kind": "lab",
+        "recipient_name": "Different Person", "recipient_contact": "person@example.org"
+    })
+    assert r.status_code == 422
+    assert not links  # An unprovisioned identity cannot be sent a protected request.
 
 
 def test_old_session_cannot_open_other_request(client):

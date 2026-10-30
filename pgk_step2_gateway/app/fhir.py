@@ -87,14 +87,21 @@ def quantity(row: dict) -> dict:
     raw = (row["unit"] or "").strip()
     value = float(row["value"])
     if not raw:
-        return {"value": value, "unit": "1", "system": "http://unitsofmeasure.org", "code": "1"}
+        result = {"value": value, "unit": "1", "system": "http://unitsofmeasure.org", "code": "1"}
+        if row.get("comparator"):
+            result["comparator"] = row["comparator"]
+        return result
     aliases = {"10^9/L": "10*9/L", "×10^9/L": "10*9/L", "10⁹/L": "10*9/L",
                "sec": "s", "seconds": "s", "g/L": "g/L", "s": "s",
                "mg/dL": "mg/dL", "g/dL": "g/dL", "mmol/L": "mmol/L", "U/L": "U/L",
                "10*9/L": "10*9/L", "%": "%"}
     if raw in aliases:
-        return {"value": value, "unit": raw, "system": "http://unitsofmeasure.org", "code": aliases[raw]}
-    return {"value": value, "unit": raw}  # unknown UCUM must not be invented
+        quantity_value = {"value": value, "unit": raw, "system": "http://unitsofmeasure.org", "code": aliases[raw]}
+    else:
+        quantity_value = {"value": value, "unit": raw}  # unknown UCUM must not be invented
+    if row.get("comparator"):
+        quantity_value["comparator"] = row["comparator"]
+    return quantity_value
 
 
 def range_quantity(number: float, exemplar: dict) -> dict:
@@ -173,8 +180,9 @@ def build_transaction(row: sqlite3.Row | dict, submission: sqlite3.Row | dict) -
             raise FhirFilingError("No laboratory observations to file")
         effective = parse_date_from_markdown(submission["markdown"])
         for index, obs in enumerate(rows):
-            if not re.fullmatch(r"\d{1,7}-\d", str(obs["loinc"])):
-                raise FhirFilingError("Invalid LOINC code")
+            from .documents import valid_loinc_code
+            if not valid_loinc_code(str(obs["loinc"])):
+                raise FhirFilingError("Invalid LOINC code/check digit")
             oid = stable_id(reqid, "Observation", str(index))
             val = quantity(obs)
             loinc = str(obs["loinc"])

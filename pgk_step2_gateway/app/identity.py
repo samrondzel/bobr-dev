@@ -122,8 +122,10 @@ def invitation_landing(token: str):
         return denied("This invitation is unavailable or has expired.", 404)
     # No patient name, birth date, request type, or expected recipient on this page.
     safe_token = escape(token, quote=True)
+    # Never enumerate dynamically provisioned identities on the public page.
     options = "".join(f'<option value="{escape(key)}">{escape(identity[1])}</option>'
                       for key, identity in IDENTITIES.items())
+    options += '<option value="issued">Other synthetic eID (issuer-provisioned)</option>' 
     content = (
         "<h1>Secure document request</h1>"
         "<p>Verify your identity using the local synthetic eID simulator. "
@@ -131,6 +133,9 @@ def invitation_landing(token: str):
         f'<form method="post" action="/r/{safe_token}/verify">'
         '<label for="identity_key">Simulated eID identity</label>'
         f'<select id="identity_key" name="identity_key" required>{options}</select>'
+        '<label for="subject_id">Subject ID (for Other synthetic eID)</label>'
+        '<input type="text" id="subject_id" name="subject_id" '
+        'maxlength="100" autocomplete="off">'
         '<label for="pin">Mock eID verification code</label>'
         '<input type="password" id="pin" name="pin" maxlength="100" autocomplete="off" required>'
         '<button type="submit">Verify identity</button></form>'
@@ -141,7 +146,8 @@ def invitation_landing(token: str):
 
 
 @router.post("/r/{token}/verify")
-def verify_identity(token: str, identity_key: str = Form(...), pin: str = Form(...)):
+def verify_identity(token: str, identity_key: str = Form(...), pin: str = Form(...),
+                    subject_id: str = Form(default="")):
     with gateway.connect() as cx:
         row = resolve_link(cx, token)
         if row is None:
@@ -153,16 +159,25 @@ def verify_identity(token: str, identity_key: str = Form(...), pin: str = Form(.
                                  {"result": "denied", "reason": "attempt_limit"})
             return denied("This invitation is locked after too many failed checks.", 429)
 
-        identity = IDENTITIES.get(identity_key)
-        configured_pin = os.getenv(identity[2], "") if identity else ""
-        # Both fixture credentials and the server-side secret MUST be configured.
-        authenticated = bool(identity and configured_pin and pin and compare_digest(pin, configured_pin))
+        if identity_key == "issued":
+            from .mock_issuer import verify_issued_credential
+            verified = verify_issued_credential(cx, subject_id.strip(), pin)
+            authenticated = verified is not None
+            if verified:
+                actual_subject_id, display_name = verified
+        else:
+            identity = IDENTITIES.get(identity_key)
+            configured_pin = os.getenv(identity[2], "") if identity else ""
+            authenticated = bool(identity and configured_pin and pin and compare_digest(pin, configured_pin))
+            if authenticated:
+                actual_subject_id, display_name, _ = identity
         if not authenticated:
             recorded_failure(cx, row, "unverified-link-holder", "invalid_mock_eid_credential", False)
             return denied()
 
-        actual_subject_id, display_name, _ = identity
-        expected_subject_id = EXPECTED_NAME_TO_SUBJECT.get(row["recipient_name"].strip().casefold())
+        from .mock_issuer import expected_subject
+        # For old Step 5 requests with no bound subject, resolve legacy fixtures.
+        expected_subject_id = row["expected_eid_subject"] or expected_subject(cx, row["recipient_name"])
         if not expected_subject_id or not compare_digest(actual_subject_id, expected_subject_id):
             recorded_failure(cx, row, actual_subject_id, "recipient_identity_mismatch", True)
             return denied()
