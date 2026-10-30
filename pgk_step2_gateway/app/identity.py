@@ -210,18 +210,8 @@ def portal(request: Request):
         row = session_request(cx, request)
     if row is None:
         return denied("You must verify your identity before accessing this page.")
-    # Patient DOB is known from the supplied scenario. Later stages should load
-    # patient metadata from Patient resource, NOT embed it here.
-    kind = "Blood clotting laboratory result" if row["document_kind"] == "lab" else "Rehabilitation discharge report"
-    body = (
-        "<h1>Identity verified</h1><p class='status'>Simulated eID check passed.</p>"
-        "<p><strong>Patient:</strong> Maria Beispiel (12 March 1961)</p>"
-        "<p><strong>Requested document:</strong> " + escape(kind) + "</p>"
-        "<p><strong>Recipient:</strong> " + escape(row["recipient_name"]) + "</p>"
-        "<p>Document submission and FHIR filing will be implemented in Step 4.</p>"
-        "<p class='note'>Synthetic medical data only.</p>"
-    )
-    return document("Verified portal", body)
+    from .submissions import submission_form
+    return document("Verified portal", submission_form(row, request.cookies.get("pgk_session", "")))
 
 
 @router.post("/logout")

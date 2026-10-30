@@ -71,6 +71,22 @@ def send_message(token: str, room_id: str, body: str):
     request_json(MATRIX_URL, "PUT", path, {"msgtype": "m.text", "body": body}, token=token)
 
 
+
+def send_pending_notifications(token: str, bot_secret: str):
+    """Outbox pattern: deterministic Matrix txn ID makes crash/retry idempotent."""
+    result = request_json(GATEWAY_URL, "GET", "/internal/notifications", bot_secret=bot_secret)
+    for notice in result.get("notifications", []):
+        room = notice["room_id"]
+        transaction = notice["notification_id"]
+        path = ("/_matrix/client/v3/rooms/" + quote(room, safe="") +
+                "/send/m.room.message/" + quote(transaction, safe=""))
+        request_json(MATRIX_URL, "PUT", path,
+                     {"msgtype": "m.text", "body": notice["body"]}, token=token)
+        request_json(GATEWAY_URL, "POST", "/internal/notifications/" +
+                     quote(transaction, safe="") + "/ack", {}, bot_secret=bot_secret)
+        print("Delivered backend notification:", transaction)
+
+
 def main():
     secret = os.getenv("PGK_BOT_SECRET", "")
     if not secret:
@@ -102,7 +118,7 @@ def main():
     send_message(token, room_id, 'Gateway online. Try: !request lab "Dr. Eva Brandl" eva.brandl@labor-kanal.example')
     print("Listening for new !request commands (Ctrl+C to stop)...")
     while True:
-        path = "/_matrix/client/v3/sync?" + urlencode({"since": since, "timeout": 15000})
+        path = "/_matrix/client/v3/sync?" + urlencode({"since": since, "timeout": 2000})
         page = request_json(MATRIX_URL, "GET", path, token=token)
         events = page.get("rooms", {}).get("join", {}).get(room_id, {}).get("timeline", {}).get("events", [])
         for event in events:
@@ -137,6 +153,10 @@ def main():
         temp = STATE_FILE.with_suffix(".tmp")
         temp.write_text(since, encoding="utf-8")
         temp.replace(STATE_FILE)
+        try:
+            send_pending_notifications(token, secret)
+        except (RuntimeError, KeyError) as exc:
+            print("Notification delivery retry on next poll:", exc)
 
 
 if __name__ == "__main__":

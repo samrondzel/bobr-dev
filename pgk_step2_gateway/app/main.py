@@ -1,6 +1,6 @@
-"""Steps 2-3: Matrix requests, synthetic identity verification, and misdelivery checks.
+"""Steps 2-4: Matrix, mock eID, and Markdown submissions with M1-M3 checks.
 
-LOCAL DEMO ONLY. Synthetic data; no real identity provider or FHIR filing yet.
+LOCAL DEMO ONLY. Synthetic data; FHIR filing is not yet implemented.
 """
 from __future__ import annotations
 
@@ -88,6 +88,8 @@ def init_db() -> None:
         """)
         from .identity import init_identity_db
         init_identity_db(cx)
+        from .submissions import init_submission_db
+        init_submission_db(cx)
 
 
 @asynccontextmanager
@@ -96,7 +98,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="PGK Last Mile Gateway (Step 3)", lifespan=lifespan)
+app = FastAPI(title="PGK Last Mile Gateway (Step 4)", lifespan=lifespan)
 
 
 class CreateRequest(BaseModel):
@@ -155,7 +157,7 @@ def request_public_response(row: sqlite3.Row, created: bool):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "stage": "identity-and-misdelivery"}
+    return {"status": "ok", "stage": "markdown-upload-and-m3"}
 
 
 @app.post("/internal/requests", dependencies=[Depends(require_bot)], status_code=201)
@@ -252,3 +254,6 @@ def get_sms_outbox():
 # endpoints and the SQLite database are kept without resetting them.
 from .identity import router as identity_router
 app.include_router(identity_router)
+
+from .submissions import router as submission_router
+app.include_router(submission_router)
