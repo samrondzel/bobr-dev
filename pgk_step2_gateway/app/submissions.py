@@ -87,7 +87,7 @@ def submission_form(row: sqlite3.Row, cookie: str, error: str = "") -> str:
         '<textarea id="markdown" name="markdown" rows="10" '
         'style="width:100%;box-sizing:border-box;resize:vertical"></textarea>'
         '<button type="submit">Submit document</button></form>'
-        '<p class="note">Synthetic data only. FHIR filing will be added in Step 5.</p>'
+        '<p class="note">Synthetic data only. Accepted documents are filed to a local FHIR R4 server.</p>'
     )
 
 
@@ -166,6 +166,8 @@ async def submit_markdown(request: Request, markdown: str = Form(default=""),
             "result": "accepted", "format": "markdown", "sha256": sha256(content.encode()).hexdigest(),
             "record_count": len(parsed.get("observations", [])) if row["document_kind"] == "lab" else None,
         })
+    from .fhir import file_accepted_submission
+    file_accepted_submission(row["request_id"])  # Saved submission remains available if FHIR is offline.
     return RedirectResponse("/portal/submitted", status_code=303, headers=security_headers())
 
 
@@ -178,9 +180,12 @@ def submitted_page(request: Request):
         accepted = cx.execute("SELECT submission_id FROM submissions WHERE request_id=?", (row["request_id"],)).fetchone()
         if accepted is None:
             return RedirectResponse("/portal", status_code=303)
-    return document("Answer received", "<h1>Document received</h1><p>Your Markdown answer was accepted "
-                    "and queued for the next step: FHIR R4 mapping and storage.</p>"
-                    "<p>It has <strong>not</strong> yet been filed on a FHIR server.</p>")
+        filing = cx.execute("SELECT status FROM fhir_filings WHERE request_id=?", (row["request_id"],)).fetchone()
+    filed = filing is not None and filing["status"] == "filed"
+    message = ("<p>Your answer was filed on the FHIR R4 server. The doctor will be notified in Matrix.</p>"
+               if filed else "<p>Your answer is safely received but FHIR filing is pending or failed. "
+                             "The operator can retry without asking you to submit again.</p>")
+    return document("Answer received", "<h1>Document received</h1>" + message)
 
 
 @router.get("/internal/notifications", dependencies=[gateway.Depends(gateway.require_bot)])

@@ -90,6 +90,8 @@ def init_db() -> None:
         init_identity_db(cx)
         from .submissions import init_submission_db
         init_submission_db(cx)
+        from .fhir import init_fhir_db
+        init_fhir_db(cx)
 
 
 @asynccontextmanager
@@ -98,7 +100,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="PGK Last Mile Gateway (Step 4)", lifespan=lifespan)
+app = FastAPI(title="PGK Last Mile Gateway (Step 5)", lifespan=lifespan)
 
 
 class CreateRequest(BaseModel):
@@ -157,7 +159,7 @@ def request_public_response(row: sqlite3.Row, created: bool):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "stage": "markdown-upload-and-m3"}
+    return {"status": "ok", "stage": "fhir-r4-filing"}
 
 
 @app.post("/internal/requests", dependencies=[Depends(require_bot)], status_code=201)
@@ -166,12 +168,19 @@ def create_request(payload: CreateRequest, response: Response):
     allowed_sender = os.getenv("PGK_ALLOWED_SENDER", "@lena.hofer:klinikum.example")
     if not allowed_room or payload.matrix_room_id != allowed_room or payload.matrix_sender != allowed_sender:
         raise HTTPException(403, "Matrix user or room not authorized")
-    channel = "email" if payload.document_kind == "lab" else "sms"
+   
     contact = payload.recipient_contact.strip()
-    if channel == "email" and not EMAIL_PATTERN.fullmatch(contact):
-        raise HTTPException(422, "Lab recipient requires a valid email address")
-    if channel == "sms" and not PHONE_PATTERN.fullmatch(contact):
-        raise HTTPException(422, "Rehab recipient requires an international phone number")
+
+    if EMAIL_PATTERN.fullmatch(contact):
+        channel = "email"
+    elif PHONE_PATTERN.fullmatch(contact):
+        channel = "sms"
+    else:
+        raise HTTPException(
+            422,
+            "Recipient contact must be a valid email address "
+            "or international phone number"
+        )
 
     # Matrix event ID is the idempotency key: reconnects MUST NOT resend invitations.
     with connect() as cx:
@@ -257,3 +266,6 @@ app.include_router(identity_router)
 
 from .submissions import router as submission_router
 app.include_router(submission_router)
+
+from .fhir import router as fhir_router
+app.include_router(fhir_router)

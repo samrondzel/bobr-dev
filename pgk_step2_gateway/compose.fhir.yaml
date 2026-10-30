@@ -1,0 +1,16 @@
+# Separate from existing Synapse/Element and Mailpit Compose stacks.
+# Local-only demo with synthetic data. Never expose unauthenticated HAPI to Internet.
+services:
+  fhir:
+    image: hapiproject/hapi:latest
+    environment:
+      # HAPI's default starter config uses in-memory H2. Preserve FHIR records
+      # across container restarts so gateway's 'filed' state remains consistent.
+      SPRING_DATASOURCE_URL: "jdbc:h2:file:/data/h2/pgk;DB_CLOSE_ON_EXIT=FALSE"
+    volumes:
+      - pgk_fhir_h2:/data/h2
+    ports:
+      - "127.0.0.1:8090:8080"  # Element already uses 8080
+    restart: unless-stopped
+volumes:
+  pgk_fhir_h2:

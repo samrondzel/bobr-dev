@@ -43,6 +43,8 @@ def demo(tmp_path, monkeypatch):
     monkeypatch.setenv("PGK_MOCK_EID_OUTSIDER_PIN", "test-outsider")
     links = []
     monkeypatch.setattr(gateway, "deliver_email", lambda addr, url: links.append(url))
+    from app import fhir
+    monkeypatch.setattr(fhir, "post_transaction", lambda bundle: {"resourceType": "Bundle", "type": "transaction-response", "entry": [{"response": {"status": "200 OK"}} for _ in bundle["entry"]]})
     with TestClient(gateway.app) as api:
         yield api, links
 
@@ -109,7 +111,7 @@ def test_m3_cannot_fake_name_with_wrong_birth_date(demo):
     assert audit(api, req_id)[-1]["what"] == "MISDELIVERY_CAUGHT"
 
 
-def test_lab_success_creates_structured_submission_not_yet_fhir(demo):
+def test_lab_success_creates_structured_submission_and_files_fhir(demo):
     api, _ = demo
     req_id, csrf = create_verified(demo)
     sent = submit(api, csrf, lab(value="1.1"))
@@ -117,16 +119,17 @@ def test_lab_success_creates_structured_submission_not_yet_fhir(demo):
     assert sent.headers["location"] == "/portal/submitted"
     confirmation = api.get("/portal/submitted")
     assert confirmation.status_code == 200
-    assert "not</strong> yet been filed" in confirmation.text
+    assert "filed on the FHIR R4 server" in confirmation.text
     data = api.get("/internal/submissions/" + req_id, headers={"X-Bot-Secret": SECRET}).json()
     assert data["patient_ref"] == "Patient/maria-beispiel"
     assert data["parsed"]["kind"] == "lab"
     assert len(data["parsed"]["observations"]) == 2
     assert data["parsed"]["observations"][0]["loinc"] == "6301-6"
     assert data["parsed"]["observations"][0]["value"] == pytest.approx(1.1)
-    assert audit(api, req_id)[-1]["what"] == "ANSWER_SENT"
+    assert [x["what"] for x in audit(api, req_id)][-2:] == ["ANSWER_SENT", "ANSWER_FILED"]
     assert submit(api, csrf, lab()).status_code == 409
-    assert api.get("/internal/notifications", headers={"X-Bot-Secret": SECRET}).json()["notifications"] == []
+    notes = api.get("/internal/notifications", headers={"X-Bot-Secret": SECRET}).json()["notifications"]
+    assert len(notes) == 1 and "FHIR R4" in notes[0]["body"]
 
 
 def test_rehab_text_accepted(demo):
